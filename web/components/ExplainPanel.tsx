@@ -8,7 +8,8 @@
 import { useEffect, useState } from "react";
 import { api , humanizeError } from "@/lib/api";
 import { Busy } from "@/components/Spinner";
-import type { ObjectExplanation } from "@/lib/types";
+import { toast } from "@/lib/toast";
+import type { LabelAgentTrace, ObjectExplanation } from "@/lib/types";
 
 const DECISION_COLOR: Record<string, string> = {
   auto_accept: "text-pass border-pass",
@@ -16,9 +17,58 @@ const DECISION_COLOR: Record<string, string> = {
   annotate: "text-block border-block",
 };
 
+const AGENT_ACTION: Record<string, { label: string; cls: string }> = {
+  fix: { label: "class fixed", cls: "border-accent/60 text-accent-2" },
+  flag: { label: "maybe not an object", cls: "border-block/50 text-block" },
+  ask: { label: "question", cls: "border-warn/50 text-warn" },
+};
+
+// The label agent's second opinion on the class: what it did, the question it asks the reviewer, the votes
+// behind it, and a way to take a fix back. Votes are shown with their margins because the agent acts on the
+// margin, not on a probability, and a reviewer deciding whether to trust it should see the same number.
+function LabelAgentBlock({ la, objectId, onUndone }: { la: LabelAgentTrace; objectId: string; onUndone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const a = AGENT_ACTION[la.action] ?? { label: la.action, cls: "border-line text-ink-3" };
+  const undo = async () => {
+    setBusy(true);
+    try {
+      await api.labelagentUndo(objectId);
+      toast("Undone. Reload the frame to see the original label.");
+      onUndone();
+    } catch (e) {
+      toast("Could not undo: " + humanizeError(e), "warn");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="border-t hairline pt-1.5 space-y-1">
+      <div className="flex items-center justify-between gap-2">
+        <span className="label-caps">Label agent</span>
+        <span className={`border px-1 rounded ${a.cls}`}>{a.label}</span>
+      </div>
+      {la.action === "fix" && <div>{la.from} &rarr; <span className="text-ink">{la.to}</span></div>}
+      {la.question && <div className="text-ink">{la.question}</div>}
+      {Object.entries(la.votes).map(([who, v]) => (
+        <div key={who} className="flex items-center justify-between gap-2">
+          <span className="text-ink-3">{who}</span>
+          <span className="truncate">{v.label} <span className="text-ink-3">margin {v.margin.toFixed(2)}</span></span>
+        </div>
+      ))}
+      {la.undoable && la.action !== "ask" && (
+        <button onClick={undo} disabled={busy} aria-label="undo the label agent's change to this object"
+          className="text-[11px] border border-line rounded px-1.5 py-0.5 text-ink-2 hover:border-block hover:text-block disabled:opacity-40">
+          {busy ? "undoing..." : la.action === "fix" ? `undo: back to ${la.from}` : "undo"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function ExplainPanel({ objectId }: { objectId: string }) {
   const [ex, setEx] = useState<ObjectExplanation | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -26,7 +76,7 @@ export default function ExplainPanel({ objectId }: { objectId: string }) {
     setErr(null);
     api.explainObject(objectId).then((e) => live && setEx(e)).catch((e) => live && setErr(humanizeError(e)));
     return () => { live = false; };
-  }, [objectId]);
+  }, [objectId, nonce]);
 
   if (err) return <div className="text-[11px] text-block px-1">{err}</div>;
   if (!ex) return <div className="text-[11px] text-ink-3 px-1 flex items-center gap-1.5"><Busy />explaining...</div>;
@@ -50,6 +100,8 @@ export default function ExplainPanel({ objectId }: { objectId: string }) {
           </li>
         ))}
       </ul>
+
+      {ex.label_agent && <LabelAgentBlock la={ex.label_agent} objectId={objectId} onUndone={() => setNonce((n) => n + 1)} />}
 
       {/* structured factors */}
       <div className="border-t hairline pt-1.5 space-y-1">

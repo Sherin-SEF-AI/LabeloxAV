@@ -8,6 +8,7 @@ import ActivityLog from "@/components/agent/ActivityLog";
 import InterruptedRuns from "@/components/agent/InterruptedRuns";
 import JobWatcher from "@/components/agent/JobWatcher";
 import ContaminationPanel from "@/components/agent/ContaminationPanel";
+import LabelAgentPanel from "@/components/agent/LabelAgentPanel";
 import Inspector from "@/components/shell/Inspector";
 import EvidencePanel, { type EvidenceSubject } from "@/components/inspect/EvidencePanel";
 import LineageObjects from "@/components/inspect/LineageObjects";
@@ -590,6 +591,8 @@ export default function AgentConsole() {
           <JobWatcher />
 
           <ActivityLog log={log} onClear={() => setLog((l) => ({ entries: [], seq: l.seq }))} />
+
+          <LabelAgentPanel />
 
           {/* Self-healing: corpus-wide fixes */}
           <Group title="Fix labels across the corpus" desc="Every run is recorded and can be undone from Agent jobs.">

@@ -2088,6 +2088,21 @@ class LabeloxClient:
         return self._call("POST", f"/api/jobs/{kind}/{job_id}/cancel",
                           params=None, json_body=None)
 
+    def get_labelagent_benchmark(self) -> Any:
+        """Benchmark"""
+        return self._call("GET", f"/api/labelagent/benchmark",
+                          params=None, json_body=None)
+
+    def post_labelagent_objects_by_object_id_undo(self, object_id: str) -> Any:
+        """Undo"""
+        return self._call("POST", f"/api/labelagent/objects/{object_id}/undo",
+                          params=None, json_body=None)
+
+    def post_labelagent_sessions_by_session_id_run(self, session_id: str, body: Any = None) -> Any:
+        """Run"""
+        return self._call("POST", f"/api/labelagent/sessions/{session_id}/run",
+                          params=None, json_body=body)
+
     def get_labelops_issues(self, frame_id: Any | None = None, job_id: Any | None = None, object_id: Any | None = None, status: Any | None = None, mine: bool | None = False) -> Any:
         """List Issues"""
         return self._call("GET", f"/api/labelops/issues",
@@ -4526,4 +4541,4 @@ def _clean(params: dict | None) -> dict | None:
     return {k: v for k, v in params.items() if v is not None}
 
 
-# 888 routes generated from the server schema.
+# 891 routes generated from the server schema.

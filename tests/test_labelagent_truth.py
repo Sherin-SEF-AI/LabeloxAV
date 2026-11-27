@@ -8,7 +8,14 @@ person's last word is truth, machine rows never count, a box nobody predicted is
 from __future__ import annotations
 
 from services.labelagent.benchmark import Prediction, outcome, score, wilson_upper, with_floor
-from services.labelagent.truth import NOT_OBJECT, TruthItem, derive, split_of
+from services.labelagent.truth import (
+    NOT_OBJECT,
+    SPLIT_BLOCK_NS,
+    TruthItem,
+    block_key,
+    derive,
+    split_of,
+)
 
 NOT_IDS = frozenset({229, 155})
 SID, FID = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
@@ -70,9 +77,14 @@ def test_an_accept_is_a_correct_prediction():
     assert it.correct
 
 
-def test_the_split_is_by_session_and_stable():
-    assert split_of(SID) == split_of(SID)
-    sides = {split_of(f"{n:08d}-0000-0000-0000-000000000000") for n in range(200)}
+def test_the_split_is_by_stretch_of_driving_and_stable():
+    """Overlapping 60-second clips are different sessions holding the same objects, so the unit is a block
+    of one vehicle's time: two moments a minute apart always land on the same side."""
+    t0 = 5 * SPLIT_BLOCK_NS + 1_000
+    assert block_key("DASHCAM-01", t0) == block_key("DASHCAM-01", t0 + 60 * 10**9)
+    assert block_key("DASHCAM-01", t0) != block_key("OTHER", t0)
+    assert split_of(block_key("DASHCAM-01", t0)) == split_of(block_key("DASHCAM-01", t0))
+    sides = {split_of(block_key("V", n * SPLIT_BLOCK_NS)) for n in range(200)}
     assert sides == {"test", "calib"}
 
 

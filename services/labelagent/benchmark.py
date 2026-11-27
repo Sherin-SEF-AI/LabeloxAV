@@ -371,3 +371,225 @@ async def stage_classify_crop(db, items: list[TruthItem], *, min_conf: float = 0
         else:
             out[k] = Prediction(None, conf=top["conf"], note="classify_crop:below_floor")
     return out
+
+
+# ------------------------------------------------------------------------------------------------ learned
+# Both are cross-fitted, so every item is predicted by something that never saw its session: memory leaves
+# the item's own session out of the neighbourhood, and the probe is fitted on one side of the split and
+# predicts the other, then the sides swap. That is what lets them be scored on the whole set like the
+# untrained stages, rather than on the 45 right labels of the test split alone. `conf` is the margin over
+# the runner-up, so a split neighbourhood or a flat posterior reads as unsure.
+
+async def stage_memory(db, items: list[TruthItem], *, k: int = 15) -> list[Prediction]:
+    from services.labelagent.memory import Bank, load_vectors
+
+    vectors = await load_vectors(db, [i.object_id for i in items])
+    bank = Bank.build(items, vectors)
+    out = []
+    for i in items:
+        q = vectors.siglip.get(i.object_id)
+        if q is None:
+            out.append(Prediction(None, note="no crop"))
+            continue
+        v = bank.vote(q, k=k, exclude_session=i.session_id, exclude_object=i.object_id,
+                      near=(i.vehicle_id, i.ts_ns))
+        out.append(Prediction(v.label, conf=v.margin, note="memory") if v.label is not None
+                   else Prediction(None, note="memory:empty"))
+    return out
+
+
+async def stage_probe(db, items: list[TruthItem]) -> list[Prediction]:
+    from services.labelagent.memory import NEAR_NS, Probe, load_vectors
+
+    vectors = await load_vectors(db, [i.object_id for i in items])
+    out: list[Prediction] = [Prediction(None, note="no crop") for _ in items]
+    for fold in ("test", "calib"):
+        # The split is by 30-minute block, so an object can sit seconds across a block edge from itself.
+        # Training items within the buffer of any item being predicted are dropped.
+        held = defaultdict(list)
+        for i in items:
+            if i.split == fold:
+                held[i.vehicle_id].append(i.ts_ns)
+        for v in held:
+            held[v].sort()
+
+        def near_fold(i, buf=NEAR_NS // 3, held=held) -> bool:
+            import bisect
+            ts = held.get(i.vehicle_id)
+            if not ts:
+                return False
+            j = bisect.bisect_left(ts, i.ts_ns)
+            return any(0 <= n < len(ts) and abs(ts[n] - i.ts_ns) < buf for n in (j - 1, j))
+
+        probe = Probe.fit([i for i in items if i.split != fold and not near_fold(i)], vectors)
+        for k, i in enumerate(items):
+            if i.split != fold:
+                continue
+            label, _p, margin = probe.predict(i.object_id, vectors)
+            if label is not None:
+                out[k] = Prediction(label, conf=margin, note="probe")
+    return out
+
+
+# ------------------------------------------------------------------------------------------------ zero-shot
+# Both read the stored SigLIP 2 vector, so only the text encoder runs.
+
+async def stage_zs_all_stored(db, items: list[TruthItem]) -> list[Prediction]:
+    """`classify_crop` as it is today (all classes, bare prompts, no negatives), on stored vectors."""
+    from services.autolabel.ontology import get_ontology
+    from services.labelagent.memory import load_vectors
+    from services.labelagent.zeroshot import classify_all_classes
+
+    onto = get_ontology()
+    vectors = await load_vectors(db, [i.object_id for i in items])
+    out = []
+    for i in items:
+        q = vectors.siglip.get(i.object_id)
+        if q is None:
+            out.append(Prediction(None, note="no crop"))
+            continue
+        cid, p = classify_all_classes(q, onto)
+        out.append(Prediction(cid, conf=round(p, 4), note="zs_all"))
+    return out
+
+
+async def stage_family_zs(db, items: list[TruthItem]) -> list[Prediction]:
+    """Zero-shot over the confusion-family shortlist with negatives; `conf` is the margin. The confusion
+    graph is cross-fitted like the probe: built from the other half of the split."""
+    from services.autolabel.ontology import get_ontology
+    from services.labelagent.families import ConfusionGraph, shortlist
+    from services.labelagent.memory import load_vectors
+    from services.labelagent.zeroshot import classify
+
+    onto = get_ontology()
+    vectors = await load_vectors(db, [i.object_id for i in items])
+    graphs = {fold: ConfusionGraph.build([i for i in items if i.split != fold]) for fold in ("test", "calib")}
+    out = []
+    for i in items:
+        q = vectors.siglip.get(i.object_id)
+        if q is None or i.pred == NOT_OBJECT:
+            out.append(Prediction(None, note="no crop"))
+            continue
+        ans = classify(q, shortlist(i.pred, graphs[i.split], onto), onto)
+        out.append(Prediction(ans.label, conf=ans.margin, note="family_zs") if ans.label is not None
+                   else Prediction(None, note="family_zs:empty"))
+    return out
+
+
+async def stage_agent(db, items: list[TruthItem], policy=None) -> dict[str, list[Prediction]]:
+    """The agent's own rule, replayed through the same `decide` the live agent uses, on the cross-fitted
+    specialists above. Two readings: `agent` counts only what it changes on its own (fix and flag), and
+    `agent+ask` also counts the questions as if the reviewer took every suggestion, which is the most a
+    question can be worth and the most it can mislead."""
+    from core.config import get_settings
+    from services.autolabel.ontology import get_ontology
+    from services.labelagent.agent import ASK, FIX, FLAG, Votes, decide
+    from services.labelagent.memory import Vote
+    from services.labelagent.zeroshot import ZsAnswer
+
+    policy = policy or get_settings().labelagent
+    name_of, _ = namers(get_ontology())
+    mem = await stage_memory(db, items, k=policy.memory_k)
+    prb = await stage_probe(db, items)
+    zs = await stage_family_zs(db, items)
+    acted, asked = [], []
+    for i, m, p, z in zip(items, mem, prb, zs, strict=True):
+        votes = Votes(memory=Vote(m.label, margin=m.conf or 0.0) if m.label is not None else None,
+                      probe=(p.label, 0.0, p.conf or 0.0) if p.label is not None else None,
+                      zs=ZsAnswer(z.label, z.conf or 0.0, {}) if z.label is not None else None)
+        d = decide(i.pred, votes, policy, name_of)
+        acted.append(Prediction(d.label if d.action in (FIX, FLAG) else None, note=f"agent:{d.action}"))
+        asked.append(Prediction(d.label if d.action in (FIX, FLAG, ASK) else None, note=f"agent:{d.action}"))
+    return {"agent": acted, "agent+ask": asked}
+
+
+async def stage_agent_vlm(db, items: list[TruthItem], policy=None, *, votes: int = 2,
+                          max_items: int | None = None) -> dict[str, list[Prediction]]:
+    """The agent with the VLM consulted on its questions: where the rule says ASK, the VLM picks between the
+    machine's class, the agreed class, "not an object" and two more of the family, twice. `agent_vlm` turns
+    a question into a fix only when both votes name the agreed class; questions it does not settle stay
+    questions (counted as no change). GPU and Ollama: runs outside office hours only."""
+    from core.config import get_settings
+    from services.autolabel.ontology import get_ontology
+    from services.autolabel.paths.path_c_vlm import VlmVerifier, make_vlm_client
+    from services.labelagent import vlm as V
+    from services.labelagent.agent import ASK, FIX, FLAG, Votes, decide
+    from services.labelagent.families import ConfusionGraph, shortlist
+    from services.labelagent.memory import Vote
+    from services.labelagent.zeroshot import ZsAnswer
+
+    settings = get_settings()
+    policy = policy or settings.labelagent
+    onto = get_ontology()
+    name_of, _ = namers(onto)
+    mem = await stage_memory(db, items, k=policy.memory_k)
+    prb = await stage_probe(db, items)
+    zs = await stage_family_zs(db, items)
+    graphs = {f: ConfusionGraph.build([i for i in items if i.split != f]) for f in ("test", "calib")}
+
+    decisions = []
+    for i, m, p, z in zip(items, mem, prb, zs, strict=True):
+        v = Votes(memory=Vote(m.label, margin=m.conf or 0.0) if m.label is not None else None,
+                  probe=(p.label, 0.0, p.conf or 0.0) if p.label is not None else None,
+                  zs=ZsAnswer(z.label, z.conf or 0.0, {}) if z.label is not None else None)
+        decisions.append(decide(i.pred, v, policy, name_of))
+
+    ask_idx = [k for k, d in enumerate(decisions) if d.action == ASK and items[k].pred != NOT_OBJECT]
+    if max_items:
+        ask_idx = ask_idx[:max_items]
+    sub = [items[k] for k in ask_idx]
+    verifier = VlmVerifier(make_vlm_client(settings), onto, settings)
+    answers: dict[int, tuple[int | None, float]] = {}
+    try:
+        async for j, img in _iter_images(db, sub):
+            k = ask_idx[j]
+            it, d = items[k], decisions[k]
+            fam = [c for c in shortlist(it.pred, graphs[it.split], onto) if c not in (it.pred, d.label, NOT_OBJECT)]
+            cands = [it.pred, d.label, *fam[:2], NOT_OBJECT]
+            answers[k] = V.vote(verifier, img, tuple(it.bbox), cands, onto, votes=votes) if img is not None \
+                else (None, 0.0)
+    finally:
+        V.unload(settings)
+
+    base, with_vlm, vlm_alone = [], [], []
+    for k, d in enumerate(decisions):
+        acted = d.label if d.action in (FIX, FLAG) else None
+        base.append(Prediction(acted, note=f"agent:{d.action}"))
+        a = answers.get(k)
+        upgraded = a is not None and a[0] == d.label and a[1] >= 1.0
+        with_vlm.append(Prediction(d.label if (acted is not None or upgraded) else None,
+                                   note="agent_vlm:upgraded" if upgraded else f"agent:{d.action}"))
+        vlm_alone.append(Prediction(a[0] if a and a[1] >= 1.0 else None, note="vlm_mc") if k in answers
+                         else Prediction(None, note="no verdict"))
+    return {"agent": base, "agent_vlm": with_vlm, "vlm_mc_on_asks": vlm_alone}
+
+
+async def _iter_images(db, items: list[TruthItem]):
+    """(index, full frame image or None) for each item, each frame read once."""
+    import uuid as _uuid
+
+    import cv2
+    import numpy as np
+    from sqlalchemy import select
+
+    from core.storage import get_object_store
+    from db.models import Frame
+
+    store = get_object_store()
+    by_frame: dict[str, list[int]] = defaultdict(list)
+    for k, i in enumerate(items):
+        by_frame[i.frame_id].append(k)
+    fids = list(by_frame)
+    for c in range(0, len(fids), 500):
+        chunk = [_uuid.UUID(f) for f in fids[c:c + 500]]
+        uris = dict((await db.execute(select(Frame.frame_id, Frame.img_uri).where(Frame.frame_id.in_(chunk)))).all())
+        for f in fids[c:c + 500]:
+            img = None
+            uri = uris.get(_uuid.UUID(f))
+            if uri:
+                try:
+                    img = cv2.imdecode(np.frombuffer(store.get_bytes(uri), np.uint8), cv2.IMREAD_COLOR)
+                except Exception as exc:  # noqa: BLE001 - a missing image is a missing answer, not a failed run
+                    log.warning("labelagent.frame_unreadable", frame_id=f, error=str(exc))
+            for k in by_frame[f]:
+                yield k, img

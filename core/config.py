@@ -395,6 +395,39 @@ class ReasonerSettings(BaseModel):
     record_trace: bool = True
 
 
+class LabelAgentSettings(BaseModel):
+    """The label agent (services/labelagent): independent specialists check each machine label's class.
+
+    Thresholds are the margins measured on the human-ruling benchmark (scripts/label_benchmark.py,
+    2026-11-27, 4,106 items). `fix_*` changes the class only when corpus memory and the learned probe agree on
+    the same answer with these margins and the family zero-shot does not contradict them: that fixed 19.7% of
+    wrong labels and broke 0.6% of right ones (95% upper bound 1.5%), with 99.6% of its changes correct.
+    `ask_*` is the weaker agreement (46% of wrong labels, but 3.8% breaks): it never changes the class, it
+    attaches the question to the review. A fixed label always stays in review and is reversible; nothing
+    here can accept a label or touch a person's.
+
+    Off by default until it has run on live sessions under watch.
+    """
+
+    enabled: bool = False
+    # Run as the last step of an auto-label job (embed the session's new objects, then check them).
+    after_autolabel: bool = True
+    fix_memory_margin: float = 0.5
+    fix_probe_margin: float = 0.3
+    # The zero-shot vetoes a fix when it prefers a different answer by at least this margin.
+    zs_veto_margin: float = 0.3
+    ask_memory_margin: float = 0.3
+    ask_probe_margin: float = 0.2
+    memory_k: int = 15
+    # The probe is not fitted on fewer human rulings than this; without it the agent only asks.
+    min_rulings: int = 300
+    # Fixes are allowed only while the latest saved benchmark puts the agent's wrong-fix rate, at its 95% upper
+    # bound, at or under this (services/labelagent/report.py). Otherwise every fix becomes a question.
+    max_wrong_fix: float = 0.02
+    # A fresh benchmark is queued after this many new human rulings (or when the last is a week old).
+    refresh_after_rulings: int = 200
+
+
 class GateSettings(BaseModel):
     auto_accept: float = 0.95          # benign default; calibrated, so this is a precision floor
     safety_auto_accept: float = 0.99   # M-Q.4: safety-critical classes (VRU, animal) must be near-certain
@@ -1244,6 +1277,7 @@ class Settings(BaseSettings):
     calibrate: CalibrateSettings = CalibrateSettings()
     gate: GateSettings = GateSettings()
     reasoner: ReasonerSettings = ReasonerSettings()
+    labelagent: LabelAgentSettings = LabelAgentSettings()
     quality: QualitySettings = QualitySettings()
     intelligence: IntelligenceSettings = IntelligenceSettings()
     intel: IntelSettings = IntelSettings()  # Data Intelligence Layer (Phase 1)

@@ -25,9 +25,12 @@ down here rather than left to a query:
   to the agent asks the question that matters most: does it leave a right answer alone? They have no machine
   prediction, so they count only toward the wrong-fix rate, never toward fixes. In production the agent never
   touches a human label at all; this is a measuring device, not a use.
-- **Split by session, never by object.** Objects in one session share lighting, camera and often the same
-  physical object across frames, so an object split lets memory or a probe "recognise" a test item from its
-  neighbour. The split is a stable hash of the session id, so it does not move as the corpus grows.
+- **Split by stretch of driving, not by object or even by session.** Objects close in time share lighting,
+  camera and often the same physical object, so a split that puts neighbours on both sides lets memory or a
+  probe "recognise" a test item. Sessions are not enough: DASHCAM-01's 158 ruled sessions are 60-second clips
+  of one day's drive that overlap by about 7 seconds, so adjacent sessions contain the same hoardings. The
+  unit is a 30-minute block of one vehicle's time, hashed, so it is stable as the corpus grows; memory and
+  the probe add a time buffer on top (see memory.py).
 """
 
 from __future__ import annotations
@@ -67,6 +70,7 @@ MACHINE_SOURCES = frozenset({"fused", "auto_accept", "interpolated", "propagated
 FIXTURE_VEHICLES = frozenset({"TIGOR-07", "EDIT-01", "TIGOR-T", "TIGOR-TEST", "RT-SRC", "RT-01"})
 
 TEST_FRACTION = 0.30
+SPLIT_BLOCK_NS = 30 * 60 * 1_000_000_000
 
 
 @dataclass
@@ -83,6 +87,8 @@ class TruthItem:
     pred_conf: float | None = None
     provenance: dict = field(default_factory=dict)
     action: str = ""                # the ruling that settled it
+    vehicle_id: str = ""
+    ts_ns: int = 0                  # the frame's time, for blocking neighbours that are the same moment
 
     @property
     def machine_made(self) -> bool:
@@ -96,15 +102,20 @@ class TruthItem:
         return asdict(self)
 
 
-def split_of(session_id: str, test_fraction: float = TEST_FRACTION) -> str:
-    """A session's side of the split. A hash rather than a random draw, so it is the same on every run and
-    a session never changes sides when new data arrives."""
-    h = int(hashlib.sha1(str(session_id).encode()).hexdigest()[:8], 16)
+def block_key(vehicle_id: str, ts_ns: int) -> str:
+    """The stretch of driving an object belongs to: one vehicle's 30 minutes."""
+    return f"{vehicle_id}:{int(ts_ns) // SPLIT_BLOCK_NS}"
+
+
+def split_of(key: str, test_fraction: float = TEST_FRACTION) -> str:
+    """A block's side of the split. A hash rather than a random draw, so it is the same on every run and a
+    block never changes sides when new data arrives."""
+    h = int(hashlib.sha1(str(key).encode()).hexdigest()[:8], 16)
     return "test" if (h % 1000) < int(test_fraction * 1000) else "calib"
 
 
 def derive(reviews: list[dict], current: dict, *, not_object_ids: frozenset[int],
-           session_id: str, frame_id: str) -> TruthItem | None:
+           session_id: str, frame_id: str, vehicle_id: str = "", ts_ns: int = 0) -> TruthItem | None:
     """One object's truth item from its review history, or None when the history does not make one.
 
     `reviews` are that object's rows, oldest first, each {action, reviewer, before, after, ts_ns}.
@@ -141,11 +152,11 @@ def derive(reviews: list[dict], current: dict, *, not_object_ids: frozenset[int]
         object_id=str(current["object_id"]), frame_id=str(frame_id), session_id=str(session_id),
         truth=truth, pred=pred, pred_source=pred_source,
         tier="track" if last["action"] in TRACK_RULINGS else "direct",
-        split=split_of(session_id),
+        split=split_of(block_key(vehicle_id, ts_ns)),
         bbox=[float(v) for v in bbox],
         pred_conf=float(conf) if isinstance(conf, int | float) else None,
         provenance=dict(before.get("provenance") or {}),
-        action=last["action"])
+        action=last["action"], vehicle_id=vehicle_id, ts_ns=int(ts_ns))
 
 
 async def load_truth(db: AsyncSession) -> list[TruthItem]:
@@ -164,7 +175,7 @@ async def load_truth(db: AsyncSession) -> list[TruthItem]:
     rows = (await db.execute(
         select(Review.object_id, Review.action, Review.reviewer, Review.before, Review.after, Review.ts_ns,
                Object.class_id, Object.state, Object.source, Object.frame_id,
-               Frame.session_id, DbSession.vehicle_id)
+               Frame.session_id, Frame.ts_ns.label("frame_ts"), DbSession.vehicle_id)
         .join(human_objs, human_objs.c.object_id == Review.object_id)
         .join(Object, Object.object_id == Review.object_id)
         .join(Frame, Frame.frame_id == Object.frame_id)
@@ -188,7 +199,8 @@ async def load_truth(db: AsyncSession) -> list[TruthItem]:
               "ts_ns": r.ts_ns} for r in group],
             {"object_id": head.object_id, "class_id": head.class_id, "state": head.state,
              "source": head.source},
-            not_object_ids=not_object_ids, session_id=str(head.session_id), frame_id=str(head.frame_id))
+            not_object_ids=not_object_ids, session_id=str(head.session_id), frame_id=str(head.frame_id),
+            vehicle_id=str(head.vehicle_id), ts_ns=int(head.frame_ts or 0))
         if item is not None:
             items.append(item)
 
@@ -216,7 +228,7 @@ async def load_keep_set(db: AsyncSession, *, exclude: set[str] | None = None) ->
     not_object_ids = frozenset(c.id for c in onto.classes if c.name in NOT_OBJECT_CLASS_NAMES)
     rows = (await db.execute(
         select(Object.object_id, Object.class_id, Object.bbox, Object.frame_id, Frame.session_id,
-               DbSession.vehicle_id)
+               Frame.ts_ns, DbSession.vehicle_id)
         .join(Frame, Frame.frame_id == Object.frame_id)
         .join(DbSession, DbSession.session_id == Frame.session_id)
         .where(Object.source == "human", Object.state == "accepted"))).all()
@@ -229,7 +241,8 @@ async def load_keep_set(db: AsyncSession, *, exclude: set[str] | None = None) ->
         out.append(TruthItem(
             object_id=str(r.object_id), frame_id=str(r.frame_id), session_id=str(r.session_id),
             truth=int(r.class_id), pred=int(r.class_id), pred_source="human", tier="keep",
-            split=split_of(str(r.session_id)), bbox=[float(v) for v in r.bbox], action="accepted"))
+            split=split_of(block_key(str(r.vehicle_id), int(r.ts_ns or 0))), bbox=[float(v) for v in r.bbox],
+            action="accepted", vehicle_id=str(r.vehicle_id), ts_ns=int(r.ts_ns or 0)))
     return out
 
 
@@ -242,7 +255,8 @@ async def load_all(db: AsyncSession) -> list[TruthItem]:
 def summary(items: list[TruthItem]) -> dict:
     """Counts a reader needs before believing any score computed on the set."""
     out: dict = {"items": len(items), "by_tier": {}, "by_split": {}, "machine_made": 0,
-                 "pred_correct": 0, "not_object": 0, "sessions": len({i.session_id for i in items})}
+                 "pred_correct": 0, "not_object": 0, "sessions": len({i.session_id for i in items}),
+                 "blocks": len({block_key(i.vehicle_id, i.ts_ns) for i in items})}
     for i in items:
         out["by_tier"][i.tier] = out["by_tier"].get(i.tier, 0) + 1
         out["by_split"][i.split] = out["by_split"].get(i.split, 0) + 1

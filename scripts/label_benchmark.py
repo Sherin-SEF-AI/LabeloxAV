@@ -14,18 +14,14 @@ import argparse
 import asyncio
 import json
 import sys
-import time
-from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-DB_STAGES = ["detector", "vlm_stored", "reasoner"]
-# Stages that learn nothing from the calibration split: every item is unseen to them, so they are also
-# scored on the whole set, which is what gives the wrong-fix bound enough right labels to mean something.
-UNTRAINED = {"detector", "vlm_stored", "reasoner", "classify_crop"}
-MODEL_STAGES = ["classify_crop"]
-CROP_FLOORS = (0.0, 0.5, 0.8)
+DB_STAGES = ["detector", "vlm_stored", "reasoner", "memory", "probe", "zs_all_stored", "family_zs", "agent"]
+# Read stored SigLIP 2 vectors and run only the text encoder; inside office hours that runs on the CPU.
+TEXT_STAGES = {"zs_all_stored", "family_zs", "agent"}
+MODEL_STAGES = ["classify_crop", "agent_vlm"]
 
 
 def _row(name: str, rep: dict, cov: float | None) -> str:
@@ -48,6 +44,7 @@ async def main() -> int:
     ap.add_argument("--split", default="test", choices=["test", "calib", "all"])
     ap.add_argument("--save", action="store_true", help="store the report in the object store")
     ap.add_argument("--out", help="also write the report JSON to this local path")
+    ap.add_argument("--vlm-max", type=int, default=None, help="cap the questions the VLM is asked")
     ap.add_argument("--allow-office-hours", action="store_true",
                     help="run model stages even inside the quiet window")
     args = ap.parse_args()
@@ -63,54 +60,27 @@ async def main() -> int:
               "rerun later or pass --allow-office-hours", file=sys.stderr)
         return 2
 
+    if any(s in TEXT_STAGES for s in stages) and in_quiet_hours():
+        import os
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""      # keep the GPU free during office hours
+
     from db.session import get_sessionmaker
-    from services.autolabel.ontology import get_ontology
-    from services.labelagent import benchmark as B
-    from services.labelagent.truth import load_all, summary
+    from services.labelagent.report import build_report, save_report
 
-    onto = get_ontology()
-    report: dict = {"created": datetime.now(UTC).isoformat(timespec="seconds"), "split": args.split, "stages": {}}
     async with get_sessionmaker()() as db:
-        items = await load_all(db)
-        report["truth"] = summary(items)
-        report["truth_test"] = summary([i for i in items if i.split == "test"])
-        print(f"truth: {report['truth']}")
-        print(f"test split: {report['truth_test']}\n")
+        from services.labelagent.agent import _stamp
 
-        for s in stages:
-            t0 = time.perf_counter()
-            if s == "detector":
-                runs = {"detector": B.stage_detector(items)}
-            elif s == "vlm_stored":
-                runs = {"vlm_stored": await B.stage_vlm_stored(db, items)}
-            elif s == "reasoner":
-                runs = {"reasoner": await B.stage_reasoner(db, items)}
-            elif s == "classify_crop":
-                raw = await B.stage_classify_crop(db, items)
-                runs = {f"classify_crop@{fl:g}": B.with_floor(raw, fl) for fl in CROP_FLOORS}
-            dt = time.perf_counter() - t0
-            for name, preds in runs.items():
-                splits = [args.split] + (["all"] if s in UNTRAINED and args.split != "all" else [])
-                entry = {"seconds": round(dt, 1)}
-                for sp in splits:
-                    rep = B.score(items, preds, onto, split=sp)
-                    rep["coverage"] = B.coverage([p for p, i in zip(preds, items, strict=True)
-                                                  if sp == "all" or i.split == sp])
-                    entry[sp] = rep
-                    print(_row(f"{name} [{sp}]", rep, rep["coverage"]))
-                report["stages"][name] = entry
+        report = await build_report(db, stages, split=args.split, vlm_max=args.vlm_max,
+                                    on_row=lambda name, sp, rep: print(_row(f"{name} [{sp}]", rep, rep["coverage"])))
+        report["rulings_at"] = (await _stamp(db))[0]
+    print(f"\ntruth: {report['truth']}\ntest split: {report['truth_test']}")
 
     blob = json.dumps(report, indent=1).encode()
     if args.out:
         Path(args.out).write_bytes(blob)
         print(f"\nwrote {args.out}")
     if args.save:
-        from core.storage import get_object_store
-        store = get_object_store()
-        key = f"labelagent/benchmarks/{report['created'].replace(':', '')}.json"
-        store.put_bytes(key, blob, "application/json")
-        store.put_bytes("labelagent/benchmarks/latest.json", blob, "application/json")
-        print(f"\nsaved {store.uri(key)}")
+        print(f"\nsaved {save_report(report)}")
     return 0
 
 

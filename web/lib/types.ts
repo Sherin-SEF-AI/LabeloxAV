@@ -397,7 +397,19 @@ export type ObjectExplanation = {
   quality_flags: string[];
   machine_decision: string;
   deciding_reason: string;
+  /** The label agent's check, present when it fixed, flagged or questioned the class. */
+  label_agent?: LabelAgentTrace | null;
   summary: string[];
+};
+
+export type LabelAgentTrace = {
+  action: "fix" | "flag" | "ask" | string;
+  from: string | null;
+  to: string | null;
+  question: string;
+  reasons: string[];
+  votes: Record<string, { label: string; margin: number; p?: number; share?: number; neighbours?: number }>;
+  undoable: boolean;
 };
 
 export type MulticamGroups = {

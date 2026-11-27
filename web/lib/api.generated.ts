@@ -1830,6 +1830,11 @@ export type RulingIn = {
   expected_version?: number | null;
 };
 
+export type RunIn = {
+  apply?: boolean;
+  limit?: number | null;
+};
+
 export type SafetyIn = {
   objects: Record<string, unknown>[];
   ttc_horizon_s?: number;
@@ -4205,6 +4210,18 @@ export type Operations = {
     path: { kind: string; job_id: string };
     response: JobCancelOut;
   };
+  "GET /api/labelagent/benchmark": {
+    response: Record<string, unknown>;
+  };
+  "POST /api/labelagent/objects/{object_id}/undo": {
+    path: { object_id: string };
+    response: Record<string, unknown>;
+  };
+  "POST /api/labelagent/sessions/{session_id}/run": {
+    body: RunIn;
+    path: { session_id: string };
+    response: Record<string, unknown>;
+  };
   "GET /api/labelops/issues": {
     query: { frame_id?: string | null; job_id?: string | null; object_id?: string | null; status?: string | null; mine?: boolean };
     response: unknown;
@@ -6225,4 +6242,4 @@ export type Body<K extends keyof Operations> = Operations[K] extends { body: inf
 /** What this operation returns (`unknown` until the server declares it). */
 export type Result<K extends keyof Operations> = Operations[K]["response"];
 
-export const API_SCHEMA_STATS = { operations: 900, typedResponses: 93, schemas: 336 } as const;
+export const API_SCHEMA_STATS = { operations: 903, typedResponses: 96, schemas: 337 } as const;

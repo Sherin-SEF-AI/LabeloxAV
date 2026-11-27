@@ -145,6 +145,20 @@ import { toast } from "./toast";
 // A typed request failure carrying the HTTP status and a human message, so a page can show "You're signed
 // out" instead of "GET /api/datasets -> 401". humanize() maps the common statuses; the raw server detail is
 // kept on .detail for a developer who wants it.
+export type LabelAgentScore = {
+  n: number; fix_rate: number | null; wrong_fix_rate: number | null; wrong_fix_upper95: number | null;
+  n_right_labels: number; change_precision: number | null; not_object_catch: number | null;
+  not_object_false_alarm: number | null; outcomes: Record<string, number>;
+  top_confusions: { truth: string; answer: string; n: number }[];
+};
+export type LabelAgentReport = {
+  created: string; split: string;
+  truth: { items: number; sessions: number; by_tier: Record<string, number>; not_object: number };
+  stages: Record<string, { seconds?: number; test?: LabelAgentStageReport; calib?: LabelAgentStageReport;
+                           all?: LabelAgentStageReport }>;
+};
+export type LabelAgentStageReport = { headline: LabelAgentScore; pooled: LabelAgentScore; coverage: number };
+
 export class ApiError extends Error {
   status: number;
   detail: string;
@@ -686,6 +700,12 @@ export const api = {
           n_objects: number; n_confirmed: number; image_url: string; current: boolean }[] }>(
       `/api/frames/${id}/filmstrip?span=${span}`),
   explainObject: (id: string) => get<ObjectExplanation>(`/api/objects/${id}/explain`),
+  // The label agent (services/labelagent): its benchmark, a session check (a tool job), one object's undo.
+  labelagentBenchmark: () => get<{ report: LabelAgentReport | null; detail?: string }>("/api/labelagent/benchmark"),
+  labelagentRun: (session_id: string, apply: boolean) =>
+    post<{ job_id: string; status: string; apply: boolean }>(`/api/labelagent/sessions/${session_id}/run`, { apply }),
+  labelagentUndo: (object_id: string) =>
+    post<{ object_id: string; class_id: number; state: string }>(`/api/labelagent/objects/${object_id}/undo`, {}),
   // M-F.5 scene-graph relations + VLM dataset generation
   sceneGraphVocab: () => get<{ relations: string[]; geometric: string[]; vlm_or_human: string[] }>(`/api/scene-graph/vocab`),
   relationsPropose: (frameId: string) => post<{ proposed: number; by_kind: Record<string, number> }>(`/api/frames/${frameId}/relations/propose`, {}),

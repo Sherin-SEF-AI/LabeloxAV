@@ -129,6 +129,22 @@ async def explain_object(db: AsyncSession, object_id: UUID) -> dict:
                        "confirmation to auto-accept.")
     summary.append(f"Decision: {decision}. {reason}")
 
+    # The label agent's check, when it ran and did something other than keep the label. Kept as its own
+    # block because it is a second opinion on the class, not part of the gate's decision above.
+    la = prov.get("labelagent") if isinstance(prov.get("labelagent"), dict) else None
+    label_agent = None
+    if la:
+        label_agent = {"action": la.get("action"), "from": la.get("from"), "to": la.get("to"),
+                       "question": la.get("question") or "", "reasons": list(la.get("reasons") or []),
+                       "votes": la.get("votes") or {}, "undoable": obj.source != "human"}
+        if la.get("action") == "fix":
+            summary.append(f"The label agent changed the class from {la.get('from')} to {la.get('to')}: corpus "
+                           "memory and the learned probe agreed. It stays in review and can be undone.")
+        elif la.get("action") == "flag":
+            summary.append("The label agent thinks this box may not be a real object.")
+        elif la.get("action") == "ask":
+            summary.append(f"The label agent asks: {la.get('question')}")
+
     if obj.source == "human":
         summary.append("A human has since annotated or corrected this object.")
     elif prov.get("agent_run_id"):
@@ -147,6 +163,7 @@ async def explain_object(db: AsyncSession, object_id: UUID) -> dict:
                         "calibrated": calibrated, "auto_accept_floor": threshold},
         "quality_flags": quality_flags,
         "machine_decision": decision, "deciding_reason": reason,
+        "label_agent": label_agent,
         "summary": summary,
     }
 

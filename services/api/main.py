@@ -830,3 +830,7 @@ for _tools_router, _tag in ((tool_jobs, "tools"), (tools_video, "tools-video"), 
                             (tools_scene3d, "tools-3d"), (tools_driving, "tools-driving"),
                             (tools_sensors, "tools-sensors"), (tools_agents, "tools-agents")):
     app.include_router(_tools_router.router, prefix="/api", tags=[_tag], dependencies=PROJECT_GUARD)
+
+from services.api.routers import labelagent  # noqa: E402
+
+app.include_router(labelagent.router, prefix="/api", tags=["labelagent"], dependencies=PROJECT_GUARD)

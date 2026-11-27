@@ -671,6 +671,24 @@ async def _autolabel_session_locked(session_id: UUID, limit: int | None, vlm_cli
         finally:
             await bus.stop()
 
+    # The label agent, as the job's last step: embed the new objects, then let corpus memory, the learned
+    # probe and the family zero-shot check each machine class. It can fix a class (the label stays in review),
+    # flag a likely non-object, or attach a question, and anything it disagrees with that the gate
+    # auto-accepted goes back to review. It never accepts. A failure here costs the session its check, not
+    # its labels, which are already committed above.
+    if settings.labelagent.enabled and settings.labelagent.after_autolabel and totals["objects"]:
+        try:
+            from services.intelligence.embed.service import embed_objects
+            from services.labelagent.agent import run_session
+
+            await embed_objects(session_id, only_missing=True)
+            async with get_sessionmaker()() as adb:
+                la = await run_session(adb, session_id, apply=True, created_by="autolabel")
+            totals["labelagent"] = {"decisions": la.get("decisions", {}), "run_id": la.get("run_id")}
+        except Exception as exc:  # noqa: BLE001 - the labels stand; the check is reported as not run
+            log.warning("autolabel.labelagent_failed", session_id=str(session_id), error=str(exc))
+            totals["labelagent"] = {"error": str(exc)[:300]}
+
     objects = max(totals["objects"], 1)
     totals["vlm_call_rate"] = round(totals["vlm_calls"] / objects, 4)
     summary.update(totals)

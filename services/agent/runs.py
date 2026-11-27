@@ -128,7 +128,7 @@ async def revert_run(db: AsyncSession, run_id: uuid.UUID) -> dict:
             obj.attrs = ch["from_attrs"]
         obj.version = (obj.version or 0) + 1
         prov = dict(prov)
-        for k in ("agent_run_id", "agent_critic", "agent_cuboid", "agent_attrs"):
+        for k in ("agent_run_id", "agent_critic", "agent_cuboid", "agent_attrs", "labelagent"):
             prov.pop(k, None)
         obj.provenance = prov
         reverted += 1

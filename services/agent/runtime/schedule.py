@@ -298,6 +298,18 @@ async def run_due(db: AsyncSession, *, offhours: bool, drift: dict | None = None
         except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
             log.error("schedule.yardstick_failed", error=str(exc))
 
+    # The label agent's yardstick: re-score it against human rulings when enough new ones have arrived. Its
+    # right to fix classes is read from that report, so a stale report would leave it acting on old numbers.
+    if offhours:
+        try:
+            from services.labelagent.report import maybe_benchmark
+
+            lb = await maybe_benchmark(db, now=now)
+            if lb.get("ran"):
+                actions.append({"action": "labelagent_benchmark", "job_id": lb.get("job_id")})
+        except Exception as exc:  # noqa: BLE001 - a fleet agent never blocks the governance loop
+            log.error("schedule.labelagent_benchmark_failed", error=str(exc))
+
     # The overnight autopilot (/autopilot): once a night, outside office hours and only when a person switched
     # it on, queue the night's GPU job (auto-label new sessions, VLM check, error sweep, ladder-gated
     # auto-accept, morning report). The job itself runs in the GPU worker; this only decides that tonight is due.
