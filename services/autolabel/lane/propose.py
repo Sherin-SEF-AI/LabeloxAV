@@ -16,7 +16,7 @@ from core.logging import get_logger
 from core.storage import get_object_store
 from db.models import Frame, Lane
 from services.autolabel.lane.curves import fit_control_points, mark_ego
-from services.autolabel.lane.detect import model_tag, propose_lanes
+from services.autolabel.lane.detect import propose_lanes_tagged
 from services.autolabel.lane.linetype import MODEL_VERSION as LINETYPE_VERSION
 from services.autolabel.lane.linetype import classify_lane
 from services.autolabel.lane.plausible import filter_proposals
@@ -49,7 +49,8 @@ async def propose_frame_lanes(db: AsyncSession, frame: Frame, img: np.ndarray) -
     but does not commit; the caller owns the transaction.
     """
     await db.execute(delete(Lane).where(Lane.frame_id == frame.frame_id, Lane.source == "proposed"))
-    cps = [fit_control_points(p) for p in propose_lanes(img)]
+    polys, tag = propose_lanes_tagged(img)
+    cps = [fit_control_points(p) for p in polys]
 
     # A lane sits on the road. The detector finds bright linear structure, and a dashcam frame is full of
     # bright linear structure that is not a lane: a striped hoarding, a flyover girder, a kerb, an awning.
@@ -70,7 +71,7 @@ async def propose_frame_lanes(db: AsyncSession, frame: Frame, img: np.ndarray) -
         lane = Lane(frame_id=frame.frame_id, session_id=frame.session_id, control_points=cp,
                     lane_type=lane_type, is_ego=(i == ego), source="proposed",
                     marking_conf=conf, provenance={"linetype": evidence.as_dict()},
-                    model_version=f"{model_tag()}+{LINETYPE_VERSION}")
+                    model_version=f"{tag}+{LINETYPE_VERSION}")
         db.add(lane)
         created.append(lane)
     await db.flush()

@@ -124,8 +124,8 @@ def _surface_polys(mask: np.ndarray) -> list[list[float]]:
     return polys
 
 
-def _segment_seg(image_bgr: np.ndarray) -> dict:
-    """Real drivable surface from the semantic segmenter: the road pixels themselves, not a geometric guess."""
+def _labels(image_bgr: np.ndarray) -> tuple[np.ndarray, str, dict]:
+    """One forward pass of the segmenter: the per-pixel label map, the model tag, and the loaded state."""
     from PIL import Image
 
     s = _seg_model()
@@ -141,6 +141,45 @@ def _segment_seg(image_bgr: np.ndarray) -> dict:
         up = s["torch"].nn.functional.interpolate(out.logits, size=(h, w), mode="bilinear", align_corners=False)
         labels = up.argmax(dim=1)[0].cpu().numpy()
         tag = "segformer-cityscapes:local"
+    return labels, tag, s
+
+
+# Mapillary's painted lane-line classes. Crosswalk and stop-line paint are excluded on purpose: they run
+# across the road, and a lane polyline built from a zebra crossing is a horizontal line nobody drives along.
+_MARKING = ("lane marking", "lane-marking", "lane_marking")
+
+
+def _marking_ids(id2label: dict) -> list[int]:
+    out = []
+    for i, lab in id2label.items():
+        low = str(lab).lower()
+        if any(k in low for k in _MARKING) and "crosswalk" not in low and "stop" not in low:
+            out.append(int(i))
+    return out
+
+
+def lane_marking_mask(image_bgr: np.ndarray) -> np.ndarray:
+    """Pixels the segmenter calls painted lane line, or raise DrivableUnavailable.
+
+    This is what lanes are built from locally. The alternative on this box was an edge detector, which finds
+    the strongest straight edge in the lower half of the picture: a kerb's top edge, the side of a painted
+    line rather than its middle, a median barrier. Paint is a class this model already predicts, and a kerb
+    is a different one, so asking it is the difference between "a line" and "a lane line".
+    """
+    try:
+        labels, _tag, s = _labels(image_bgr)
+    except Exception as exc:  # noqa: BLE001
+        raise DrivableUnavailable(str(exc)) from exc
+    ids = _marking_ids(s["model"].config.id2label)
+    if not ids:
+        raise DrivableUnavailable(f"{_SEG_MODEL} has no lane-marking class (use a Mapillary model)")
+    return np.isin(labels, ids)
+
+
+def _segment_seg(image_bgr: np.ndarray) -> dict:
+    """Real drivable surface from the semantic segmenter: the road pixels themselves, not a geometric guess."""
+    labels, tag, s = _labels(image_bgr)
+    h, w = labels.shape[:2]
     classes: dict = {}
     cov: dict = {}
     total = float(h * w) or 1.0

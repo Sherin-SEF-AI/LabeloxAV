@@ -176,7 +176,10 @@ async def propose(frame_id: UUID, db: AsyncSession = Depends(db_session)):
     created, rejected = await propose_frame_lanes(db, frame, img)
     out = [_row(lane) for lane in created]
     await db.commit()
-    return {"proposed": len(out), "lanes": out, "model": model_tag(),
+    # The tag of what actually drew them: the marking segmenter, or the edge-detector fallback when it could
+    # not load. The configured name is not evidence of which one ran.
+    ran = (created[0].model_version or "").split("+")[0] if created else model_tag()
+    return {"proposed": len(out), "lanes": out, "model": ran,
             # Reported rather than dropped quietly. A proposer that silently halves its own output is one
             # nobody can debug, and if this rejects everything the drivable mask is the thing to look at.
             "rejected_off_surface": len(rejected),

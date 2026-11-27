@@ -300,8 +300,8 @@ class TrackEventSettings(BaseModel):
 
 
 class LaneSettings(BaseModel):
-    model: str = "clrernet"        # clrernet | ufldv2 (pod) | classical (local fallback)
-    backend: str = "local"         # local (classical proposal) | pod (CLRerNet via cloud seam)
+    model: str = "clrernet"        # pod: clrernet | ufldv2. local: anything but "classical" uses the Mapillary lane-marking segmenter; "classical" forces Hough
+    backend: str = "local"         # local (lane-marking segmenter, Hough if it cannot load) | pod (via cloud seam)
     max_lanes: int = 6
     control_points: int = 5        # control points per fitted spline
 
