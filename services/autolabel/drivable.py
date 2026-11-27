@@ -96,14 +96,17 @@ def _seg_model():
         if "mask2former" in _SEG_MODEL:
             from transformers import AutoImageProcessor, Mask2FormerForUniversalSegmentation
 
-            proc = AutoImageProcessor.from_pretrained(_SEG_MODEL)
+            # backend="pil": transformers 5 defaults to its torchvision preprocessing, which resizes
+            # differently from the PIL path every mask so far was made with (2.3% of pixels changed class
+            # on a measured frame). Pinned so a dependency bump does not quietly move the surface.
+            proc = AutoImageProcessor.from_pretrained(_SEG_MODEL, backend="pil")
             model = Mask2FormerForUniversalSegmentation.from_pretrained(_SEG_MODEL).to(dev).eval()
             surf = _build_surface_map(model.config.id2label)
             _seg_state.update(kind="mask2former", proc=proc, model=model, torch=torch, dev=dev, surf=surf)
         else:
-            from transformers import SegformerForSemanticSegmentation, SegformerImageProcessor
+            from transformers import AutoImageProcessor, SegformerForSemanticSegmentation
 
-            proc = SegformerImageProcessor.from_pretrained(_SEG_MODEL)
+            proc = AutoImageProcessor.from_pretrained(_SEG_MODEL, backend="pil")
             model = SegformerForSemanticSegmentation.from_pretrained(_SEG_MODEL).to(dev).eval()
             _seg_state.update(kind="segformer", proc=proc, model=model, torch=torch, dev=dev, surf=_CITY_SURFACE)
         log.info("drivable.seg_loaded", model=_SEG_MODEL, device=dev, kind=_seg_state["kind"])
