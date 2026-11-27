@@ -103,18 +103,51 @@ async def session_events(db: AsyncSession, session_id: uuid.UUID) -> list[dict]:
     return events
 
 
+def _edge(a: int, b: int) -> int:
+    """The first timestamp that resolves to the later of two adjacent frames. A tie (exactly halfway) goes
+    to the earlier frame, so the later one starts one nanosecond past the floor of the midpoint."""
+    return (a + b) // 2 + 1
+
+
+async def nearest_frame(db: AsyncSession, session_id: uuid.UUID, ts_ns: int) -> dict | None:
+    """The extracted frame nearest `ts_ns`, and the window of time over which it stays the nearest.
+
+    The image panel asks this on every playback tick, so it must be cheap and it must let the caller stop
+    asking. It used to `ORDER BY abs(ts_ns - x)`, which no index serves, so every tick read every frame of
+    the session; and it returned no window, so the panel re-asked every few milliseconds for the frame it
+    was already showing, which is what tripped the rate limiter. Each query here walks
+    `ix_frame_session_ts` to one row. `valid_from_ns` / `valid_to_ns` sit at the midpoints to the neighbouring
+    frames (None at either end of the session): any playhead inside [from, to) resolves to this same frame.
+    """
+    cols = (Frame.frame_id, Frame.ts_ns, Frame.width, Frame.height, Frame.cam_id)
+    base = select(*cols).where(Frame.session_id == session_id)
+    lo = (await db.execute(base.where(Frame.ts_ns <= ts_ns).order_by(Frame.ts_ns.desc()).limit(1))).first()
+    hi = (await db.execute(base.where(Frame.ts_ns > ts_ns).order_by(Frame.ts_ns.asc()).limit(1))).first()
+    if lo is None and hi is None:
+        return None
+    if lo is not None and (hi is None or ts_ns - lo.ts_ns <= hi.ts_ns - ts_ns):
+        chosen, nxt = lo, hi
+        prev = (await db.execute(select(Frame.ts_ns).where(Frame.session_id == session_id, Frame.ts_ns < lo.ts_ns)
+                                 .order_by(Frame.ts_ns.desc()).limit(1))).scalar()
+    else:
+        chosen, prev = hi, (lo.ts_ns if lo is not None else None)
+        nxt = (await db.execute(base.where(Frame.ts_ns > hi.ts_ns).order_by(Frame.ts_ns.asc()).limit(1))).first()
+    c = int(chosen.ts_ns)
+    nxt_ts = int(nxt.ts_ns) if nxt is not None else None
+    return {"frame_id": chosen.frame_id, "ts_ns": c, "width": chosen.width, "height": chosen.height,
+            "cam_id": chosen.cam_id,
+            "valid_from_ns": _edge(int(prev), c) if prev is not None else None,
+            "valid_to_ns": _edge(c, nxt_ts) if nxt_ts is not None else None}
+
+
 async def annotations_at(db: AsyncSession, session_id: uuid.UUID, ts_ns: int) -> dict:
     """The nearest extracted frame's objects for the image overlay: class, confidence, box, state, source."""
-    from sqlalchemy import func
-
     from services.autolabel.ontology import get_ontology
 
-    row = (await db.execute(
-        select(Frame.frame_id, Frame.ts_ns, Frame.width, Frame.height).where(Frame.session_id == session_id)
-        .order_by(func.abs(Frame.ts_ns - ts_ns)).limit(1))).first()
-    if row is None:
-        return {"frame_id": None, "objects": []}
-    fid, fts, w, h = row
+    near = await nearest_frame(db, session_id, ts_ns)
+    if near is None:
+        return {"frame_id": None, "objects": [], "valid_from_ns": None, "valid_to_ns": None}
+    fid, fts, w, h = near["frame_id"], near["ts_ns"], near["width"], near["height"]
     onto = get_ontology()
     objs = (await db.execute(select(Object).where(Object.frame_id == fid, Object.state != "rejected"))).scalars().all()
 
@@ -125,5 +158,6 @@ async def annotations_at(db: AsyncSession, session_id: uuid.UUID, ts_ns: int) ->
             return str(cid)
 
     return {"frame_id": str(fid), "ts_ns": int(fts), "width": w, "height": h,
+            "valid_from_ns": near["valid_from_ns"], "valid_to_ns": near["valid_to_ns"],
             "objects": [{"object_id": str(o.object_id), "class_name": _name(o.class_id), "conf": round(float(o.conf or 0), 3),
                          "bbox": [float(x) for x in o.bbox], "state": o.state, "source": o.source} for o in objs]}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, type InspectorPanel , humanizeError } from "@/lib/api";
+import { api, ApiError, type InspectorPanel, humanizeError } from "@/lib/api";
 import { useClock } from "@/lib/inspector/clock";
 import { useMcap } from "@/lib/inspector/mcapContext";
 
@@ -27,9 +27,34 @@ export default function ImagePanel({ panel, onFrame }: { panel: InspectorPanel; 
   const pending = useRef<bigint | null>(null);
 
   useEffect(() => {
+    // Playback ticks the clock every few milliseconds, and this panel used to fetch on every tick: one
+    // request finished, the next started, so a playing session drove ~100 requests a second per panel at
+    // the API, past the rate limit. Once 429s came back they came back instantly, which made the loop spin
+    // faster, and each one blanked the image. Three things stop that:
+    //  - the server says over which playhead window its answer stays the nearest frame, and the panel does
+    //    not ask again while the playhead is inside it (once per extracted frame, not once per tick);
+    //  - rounds are spaced at least MIN_GAP_MS apart, so scrubbing cannot outrun the server either;
+    //  - a 429 pauses the panel for the Retry-After interval and keeps the last image on screen.
+    const MIN_GAP_MS = 80;
+    const BACKOFF_MS = 1000;
+    type Win = { from: bigint | null; to: bigint | null };
+    let frameWin: Win | null = null;
+    let annWin: Win | null = null;
+    let lastRun = 0;
+    let backoffUntil = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let alive = true;
+    const inside = (w: Win | null, ns: bigint) =>
+      w !== null && (w.from === null || ns >= w.from) && (w.to === null || ns < w.to);
+    const toWin = (r: { valid_from_ns?: number | null; valid_to_ns?: number | null }): Win | null =>
+      r.valid_from_ns === undefined && r.valid_to_ns === undefined ? null
+        : { from: r.valid_from_ns == null ? null : BigInt(r.valid_from_ns),
+            to: r.valid_to_ns == null ? null : BigInt(r.valid_to_ns) };
+    const rateLimited = (e: unknown) => e instanceof ApiError && e.status === 429;
+
     const run = async (ns: bigint) => {
-      if (busy.current) { pending.current = ns; return; }
       busy.current = true;
+      lastRun = Date.now();
       try {
         // A session with no recording has no topic to read, and the panel used to return here and sit on
         // "loading frame..." forever. The extracted-frame path needs only a session and a timestamp, which
@@ -39,32 +64,64 @@ export default function ImagePanel({ panel, onFrame }: { panel: InspectorPanel; 
         if (v && typeof v.data === "string") {
           setSrc(`data:image/${v.format || "jpeg"};base64,${v.data}`);
           setNote("");
-        } else {
+        } else if (!inside(frameWin, ns)) {
           // fast path: the extracted frame nearest this ts_ns
-          const f = await api.inspectorFrameAt(sessionId, Number(ns)).catch(() => null);
-          if (f?.image_url) { setSrc(f.image_url); setNote(""); }
+          const f = await api.inspectorFrameAt(sessionId, Number(ns));
+          if (!alive) return;
+          frameWin = toWin(f);
+          if (f.image_url) { setSrc(f.image_url); setNote(""); }
           else { setSrc(null); setNote("no frame at this time"); }
         }
         // annotation overlay: the nearest extracted frame's boxes, synchronized to playback
         if (overlays) {
-          const a = await api.inspectorAnnotationsAt(sessionId, Number(ns)).catch(() => null);
-          if (a && a.width && a.height) { setAnn({ width: a.width, height: a.height, objects: a.objects }); onFrame?.(a.frame_id, ns.toString()); }
-          else { setAnn(null); onFrame?.(null, ns.toString()); }
+          if (!inside(annWin, ns)) {
+            const a = await api.inspectorAnnotationsAt(sessionId, Number(ns));
+            if (!alive) return;
+            annWin = toWin(a);
+            if (a.width && a.height) { setAnn({ width: a.width, height: a.height, objects: a.objects }); onFrame?.(a.frame_id, ns.toString()); }
+            else { setAnn(null); onFrame?.(null, ns.toString()); }
+          }
         } else {
           setAnn(null);
         }
       } catch (e) {
-        setNote("image read error: " + humanizeError(e));
+        if (rateLimited(e)) {
+          backoffUntil = Date.now() + BACKOFF_MS;
+          pending.current = pending.current ?? ns;   // retry this time once the pause is over
+        } else if (alive) {
+          setNote("image read error: " + humanizeError(e));
+        }
       } finally {
         busy.current = false;
-        setLoaded(true);
-        if (pending.current !== null) { const n = pending.current; pending.current = null; run(n); }
+        if (alive) { setLoaded(true); drain(); }
       }
     };
+
+    const drain = () => {
+      if (busy.current || timer !== null || pending.current === null) return;
+      const now = Date.now();
+      const wait = Math.max(MIN_GAP_MS - (now - lastRun), backoffUntil - now, 0);
+      const go = () => {
+        timer = null;
+        const n = pending.current;
+        pending.current = null;
+        if (n !== null && alive) void run(n);
+      };
+      if (wait > 0) timer = setTimeout(go, wait);
+      else go();
+    };
+    const request = (ns: bigint) => { pending.current = ns; drain(); };
+
     // Once on mount as well as on every tick. Subscribing alone meant a panel added while playback was
     // paused never read anything at all, because the clock had no reason to fire.
-    void run(clock.nowNs());
-    return clock.subscribe(() => run(clock.nowNs()));
+    request(clock.nowNs());
+    const unsubscribe = clock.subscribe(() => request(clock.nowNs()));
+    return () => {
+      alive = false;
+      if (timer !== null) clearTimeout(timer);
+      pending.current = null;
+      unsubscribe();
+    };
   }, [clock, mcap, panel.topic, sessionId, onFrame, overlays]);
 
   const STROKE: Record<string, string> = { human: "#56D364", auto_accept: "#FF7A2F", fused: "#58A6FF" };

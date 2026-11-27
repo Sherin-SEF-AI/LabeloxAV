@@ -1607,9 +1607,9 @@ export const api = {
   inspectorEvents: (session_id: string) =>
     get<{ events: InspectorEvent[] }>(`/api/inspector/sessions/${session_id}/events`),
   inspectorFrameAt: (session_id: string, ts_ns: number) =>
-    get<{ frame_id: string | null; ts_ns: number | null; image_url: string | null; cam_id: string | null }>(`/api/inspector/sessions/${session_id}/frame-at?ts_ns=${ts_ns}`),
+    get<{ frame_id: string | null; ts_ns: number | null; image_url: string | null; cam_id: string | null; valid_from_ns?: number | null; valid_to_ns?: number | null }>(`/api/inspector/sessions/${session_id}/frame-at?ts_ns=${ts_ns}`),
   inspectorAnnotationsAt: (session_id: string, ts_ns: number) =>
-    get<{ frame_id: string | null; ts_ns?: number; width?: number; height?: number; objects: { object_id: string; class_name: string; conf: number; bbox: number[]; state: string; source: string }[] }>(`/api/inspector/sessions/${session_id}/annotations-at?ts_ns=${ts_ns}`),
+    get<{ frame_id: string | null; ts_ns?: number; width?: number; height?: number; valid_from_ns?: number | null; valid_to_ns?: number | null; objects: { object_id: string; class_name: string; conf: number; bbox: number[]; state: string; source: string }[] }>(`/api/inspector/sessions/${session_id}/annotations-at?ts_ns=${ts_ns}`),
   // In-app training platform
   trainingTasks: () => get<{ task_type: string; default_base_weights: string }[]>("/api/training/tasks"),
   startTraining: (body: {
