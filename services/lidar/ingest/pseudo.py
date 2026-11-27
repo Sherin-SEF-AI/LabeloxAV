@@ -44,7 +44,10 @@ def _load_depth(model_id: str):
         import torch
         from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
-        _DEPTH_PROC = AutoImageProcessor.from_pretrained(model_id, use_fast=True)
+        # backend="pil". This said use_fast=True, but transformers 4 had no fast DPT processor and fell back to
+        # the PIL one, so PIL is what every depth map so far was made with. transformers 5 has a torchvision
+        # DPT processor and would take that flag at its word; naming the backend keeps the depth unchanged.
+        _DEPTH_PROC = AutoImageProcessor.from_pretrained(model_id, backend="pil")
         model = AutoModelForDepthEstimation.from_pretrained(model_id)
         model.to("cuda" if torch.cuda.is_available() else "cpu").eval()
         _DEPTH_MODEL, _DEPTH_ID = model, model_id

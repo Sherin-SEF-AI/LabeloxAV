@@ -85,7 +85,9 @@ class GroundedPath:
                 from transformers import AutoModelForZeroShotObjectDetection as M
             else:
                 from transformers import Owlv2ForObjectDetection as M
-            proc = AutoProcessor.from_pretrained(self.model_id, local_files_only=True)
+            # backend="pil": the preprocessing these detectors were benchmarked with (transformers 4 used it).
+            # transformers 5 defaults to its torchvision path instead, which resizes slightly differently.
+            proc = AutoProcessor.from_pretrained(self.model_id, local_files_only=True, backend="pil")
             model = M.from_pretrained(self.model_id, local_files_only=True).eval()
             if torch.cuda.is_available() and dev.startswith("cuda"):
                 model = model.to(dev)
@@ -149,7 +151,7 @@ class GroundedPath:
             res = self._proc.post_process_grounded_object_detection(
                 outputs, inp.input_ids, threshold=self.box_threshold, text_threshold=self.text_threshold,
                 target_sizes=[(h, w)])[0]
-            labels = res.get("text_labels", res.get("labels"))
+            labels = res["text_labels"] if "text_labels" in res else res["labels"]
             for box, score, label in zip(res["boxes"].tolist(), res["scores"].tolist(), labels, strict=False):
                 pi = self._match(str(label), idx)
                 if pi is not None:
@@ -171,16 +173,26 @@ class GroundedPath:
 
     def _owl(self, image_bgr: np.ndarray) -> list[tuple[tuple, float, int]]:
         import torch
-        from PIL import Image
 
         h, w = image_bgr.shape[:2]
-        pil = Image.fromarray(image_bgr[:, :, ::-1])
-        inp = self._proc(text=[self._phrases], images=pil, return_tensors="pt").to(self._device)
+        side = max(h, w)   # OWLv2 pads to a square at the top-left, so the padded frame is the side x side box
+        # The square is padded here, with mid-grey, rather than left to the processor. OWLv2 was trained on
+        # grey padding and transformers 4 padded with 0.5; transformers 5 pads with 0.0 (black), which moved
+        # scores by up to 0.05 and changed which boxes clear the threshold on a dashcam frame. Rescaled the way
+        # the processor would (float64 multiply, then float32), so with do_rescale off the input is the
+        # transformers 4 one exactly and the processor's own pad has nothing left to do.
+        ip = self._proc.image_processor
+        rgb = (image_bgr[:, :, ::-1].astype(np.float64) * ip.rescale_factor).astype(np.float32)
+        canvas = np.full((side, side, 3), 0.5, dtype=np.float32)
+        canvas[:h, :w] = rgb
+        inp = self._proc(text=[self._phrases], images=canvas, do_rescale=False,
+                         return_tensors="pt").to(self._device)
         with torch.no_grad():
             outputs = self._model(**inp)
-        side = max(h, w)   # OWLv2 pads to a square at the top-left, so the padded frame is the side x side box
-        res = self._proc.post_process_object_detection(outputs, threshold=self.box_threshold,
-                                                       target_sizes=[(side, side)])[0]
+        # transformers 5 removed Owlv2Processor.post_process_object_detection; this is its replacement and
+        # does the same thing (it calls the image processor's post_process_object_detection).
+        res = self._proc.post_process_grounded_object_detection(outputs, threshold=self.box_threshold,
+                                                                target_sizes=[(side, side)])[0]
         found = []
         for box, score, li in zip(res["boxes"].tolist(), res["scores"].tolist(), res["labels"].tolist(), strict=False):
             x1, y1, x2, y2 = box

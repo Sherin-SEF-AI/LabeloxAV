@@ -30,7 +30,9 @@ jobs:
         run: make install
 
       - name: Install docs toolchain
-        run: VIRTUAL_ENV=.venv uv pip install "mkdocs-material==9.5.49" "mkdocstrings[python]==0.27.0"
+        # From the docs extra, so the versions live in pyproject.toml alone. This step carried its own copy
+        # of the pins, which is how it would have kept installing mkdocs-material 9.5.49 after the extra moved.
+        run: VIRTUAL_ENV=.venv uv pip install -e ".[docs]"
 
       # Regenerated on every build rather than committed, so the published API reference cannot drift from
       # the code. It imports the FastAPI app; no database or object store is touched.

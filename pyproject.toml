@@ -8,8 +8,8 @@ requires-python = ">=3.11,<3.12"
 # Base runtime. Heavy ML/GPU wheels live in the [project.optional-dependencies] ml extra
 # so the infra milestones (M0/M1) install and verify without CUDA wheels present.
 dependencies = [
-    "fastapi==0.115.6",
-    "starlette==0.41.3",
+    "fastapi==0.136.3",
+    "starlette==1.3.1",
     "uvicorn[standard]==0.34.0",
     "pydantic==2.10.4",
     "pydantic-settings==2.7.0",
@@ -18,7 +18,7 @@ dependencies = [
     "psycopg[binary]==3.2.3",
     "alembic==1.14.0",
     "geoalchemy2==0.16.0",
-    "boto3==1.35.81",
+    "boto3==1.42.97",
     "redis==5.2.1",
     "aiokafka==0.12.0",
     "pgvector==0.4.2",
@@ -29,7 +29,7 @@ dependencies = [
     "pyproj==3.7.0",
     "opencv-python-headless==4.10.0.84",
     "supervision==0.25.1",
-    "pyarrow==18.1.0",
+    "pyarrow==23.0.1",
     # The annotation lake. A SQL catalog on the Postgres already running and data files in the object store
     # already running, so publishing labels as Iceberg needs no catalog service of its own.
     "pyiceberg[s3fs,sql-postgres]==0.11.1",
@@ -40,11 +40,11 @@ dependencies = [
     "mcap-protobuf-support==0.5.2",
     "mcap-ros2-support==0.5.7",
     "av==17.1.0",
-    "protobuf==5.29.2",
+    "protobuf==5.29.6",
     "pypcd4==1.4.3",
     "laspy[lazrs]==2.7.0",
     "open3d==0.19.0",
-    "click==8.1.8",
+    "click==8.4.2",               # huggingface-hub 1.31+ (transformers 5.23) needs click>=8.4.2
     "httpx==0.28.1",
     "scikit-learn==1.6.0",       # also used by cleanlab confident learning (Phase 4 M4.1)
     "cleanlab==2.7.1",           # confident learning: label-error detection on accepted data (M4.1)
@@ -56,8 +56,8 @@ dependencies = [
 # Documentation site. Kept out of the base install because nothing at runtime needs it, and out of `dev`
 # because a contributor running the tests should not pay for a docs toolchain they are not building.
 docs = [
-    "mkdocs-material==9.5.49",
-    "mkdocstrings[python]==0.27.0",
+    "mkdocs-material==9.7.7",
+    "mkdocstrings[python]==1.0.8",
 ]
 # GPU/perception. Install with: uv pip install -e ".[ml]" --index-strategy unsafe-best-match
 # torch cu128 wheels are required for RTX 5080 (Blackwell, sm_120).
@@ -68,16 +68,21 @@ ml = [
     "torch==2.7.1",
     "torchvision==0.22.1",
     "ultralytics==8.3.0",
-    "clip-anytorch==2.6.0",      # provides `import clip` for YOLO-World text prompts (Path B)
+    # Provides `import clip` for YOLO-World text prompts (Path B) and the CLIP object embeddings. This is
+    # OpenAI's own repository at a pinned commit, MIT. It replaces clip-anytorch 2.6.0, the last PyPI build,
+    # which does `from pkg_resources import packaging` at import: that held setuptools below 81 (81+ drops
+    # pkg_resources), and every setuptools release that fixes its advisories is 84+. Upstream switched to
+    # the `packaging` module in 2024 but never published to PyPI, hence the archive URL; it is a plain
+    # HTTPS download of a fixed tree, so the install needs no git, and nothing imports pkg_resources.
+    "clip @ https://github.com/openai/CLIP/archive/d05afc436d78f1c48dc0dbf8e5980a9d471f35f6.zip",
     "ftfy==6.3.1",
-    "setuptools<81",             # 81+ drops pkg_resources, which clip imports
-    "transformers==4.52.4",      # bumped from 4.47.1: ships SigLIP 2 (Data Intelligence Layer, M1.0)
+    "transformers==5.23.0",      # 4.52.4 had SigLIP 2 (M1.0); 5.x clears its advisories, 5.23+ fixes Grounding DINO
     "timm==1.0.27",              # DINOv3 ViT-B/16 via the non-gated timm mirror (M1.0 visual backbone)
     "imagehash==4.3.1",          # perceptual-hash prefilter for near-duplicate detection (M1.1)
-    "accelerate==1.2.1",
+    "accelerate==1.16.0",
     "bitsandbytes==0.45.0",
     "qwen-vl-utils==0.0.8",
-    "pillow==11.0.0",
+    "pillow==13.0.0",
     "scikit-learn==1.6.0",       # isotonic calibration fit (Gate B / M9); serve-time uses np.interp
     "hdbscan==0.8.40",           # density clustering for rare-scenario discovery (M1.5)
     "umap-learn==0.5.12",        # 2D projection for the analytics cluster map (M1.7)
@@ -90,8 +95,8 @@ ml = [
 # result. Previously none of these backends were in any dependency group, so every target failed that gate
 # on a stock install and the whole subsystem was unreachable code.
 edge = [
-    "onnx==1.17.0",
-    "onnxruntime==1.20.1",
+    "onnx==1.22.0",
+    "onnxruntime==1.32.0",       # 1.20 reads ONNX IR <= 10; onnx 1.22 (advisory fixes) writes IR 13
     # Ultralytics tries to pip-install this mid-export when it is absent, which fails on a PEP 668 managed
     # interpreter and silently degrades the export to an unsimplified graph. Pinning it here keeps the
     # exported model the simplified one and keeps the export offline-safe.
@@ -111,8 +116,8 @@ observability = [
 ]
 
 dev = [
-    "pytest==8.3.4",
-    "pytest-asyncio==0.25.0",
+    "pytest==9.0.3",
+    "pytest-asyncio==1.3.0",
     "ruff==0.8.4",
     "mypy==1.14.0",
     "foxglove-schemas-protobuf==0.3.0",
@@ -134,6 +139,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["core", "db", "services", "packs"]
+
+[tool.hatch.metadata]
+# The ml extra names `clip` by a pinned archive URL (see the comment there); hatchling refuses a direct
+# reference in project metadata unless it is allowed here.
+allow-direct-references = true
 
 [tool.uv]
 # torch cu128 wheels come from the PyTorch CUDA index.
