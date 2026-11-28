@@ -44,13 +44,16 @@ def iou(a, b) -> float:
     return inter / u if u > 0 else 0.0
 
 
-async def frame_sets(max_frames: int, seed: int = 7):
-    """Gold boxes and ruled boxes, grouped by frame, sampled to the frame budget (half each)."""
+async def frame_sets(max_frames: int, seed: int = 7, test_only: bool = False):
+    """Gold boxes and ruled boxes, grouped by frame, sampled to the frame budget (half each).
+
+    test_only keeps frames from the label agent's test-split blocks alone: the ones a detector retrained on
+    the corpus (scripts/build_ruled_trainset.py) never saw, nor any frame within the same 30 minutes."""
     from sqlalchemy import select
 
-    from db.models import Frame, GoldSet, Object
+    from db.models import Frame, GoldSet, Object, Session
     from db.session import get_sessionmaker
-    from services.labelagent.truth import NOT_OBJECT, load_truth
+    from services.labelagent.truth import NOT_OBJECT, block_key, load_truth, split_of
 
     async with get_sessionmaker()() as db:
         gold_ids = set()
@@ -68,6 +71,17 @@ async def frame_sets(max_frames: int, seed: int = 7):
             if it.machine_made:
                 ruled[it.frame_id].append({"truth": it.truth, "pred": it.pred, "bbox": it.bbox,
                                            "not_object": it.truth == NOT_OBJECT})
+        if test_only:
+            side = {}
+            fids = [uuid.UUID(f) for f in set(gold) | set(ruled)]
+            for k in range(0, len(fids), 2000):
+                for fid, ts, veh in (await db.execute(
+                        select(Frame.frame_id, Frame.ts_ns, Session.vehicle_id)
+                        .join(Session, Session.session_id == Frame.session_id)
+                        .where(Frame.frame_id.in_(fids[k:k + 2000])))).all():
+                    side[str(fid)] = split_of(block_key(str(veh), int(ts or 0)))
+            gold = defaultdict(list, {f: v for f, v in gold.items() if side.get(f) == "test"})
+            ruled = defaultdict(list, {f: v for f, v in ruled.items() if side.get(f) == "test"})
         rng = random.Random(seed)
         g = sorted(gold)
         r = sorted(set(ruled) - set(gold))
@@ -83,10 +97,10 @@ async def frame_sets(max_frames: int, seed: int = 7):
     return chosen, uris, gold, ruled
 
 
-def make_detector(name: str, champion_weights: str | None, supported: set[int]):
-    if name == "champion":
+def make_detector(name: str, champion_weights: str | None, supported: set[int], candidate: str | None = None):
+    if name in ("champion", "candidate"):
         from services.autolabel.paths.path_a_detect import YoloPath
-        return YoloPath(champion_weights)
+        return YoloPath(champion_weights if name == "champion" else candidate)
     if name == "path_b":
         from services.autolabel.paths.path_b_openvocab import OpenVocabSamPath
         return OpenVocabSamPath(supported_ids=supported)
@@ -176,6 +190,9 @@ async def main() -> int:
     ap.add_argument("--cache", default=None, help="directory for cached detections")
     ap.add_argument("--save", action="store_true")
     ap.add_argument("--allow-office-hours", action="store_true")
+    ap.add_argument("--test-split-only", action="store_true",
+                    help="only frames from test-split blocks (needed to compare a detector retrained on the corpus)")
+    ap.add_argument("--candidate", default=None, help="weights for a 'candidate' detector to compare")
     args = ap.parse_args()
 
     from services.tools.registry import in_quiet_hours
@@ -192,7 +209,7 @@ async def main() -> int:
 
     onto = get_ontology()
     name_of, _ = namers(onto)
-    frames, uris, gold, ruled = await frame_sets(args.max_frames)
+    frames, uris, gold, ruled = await frame_sets(args.max_frames, test_only=args.test_split_only)
     supported = await supported_concept_ids()
     from services.autolabel.runner import resolve_detector_weights
 
@@ -205,12 +222,15 @@ async def main() -> int:
     cache.mkdir(parents=True, exist_ok=True)
     dets: dict[str, dict] = {}
     for name in [d.strip() for d in args.detectors.split(",")]:
-        f = cache / f"{name}-{args.max_frames}.json"
+        tag = f"{args.max_frames}{'-test' if args.test_split_only else ''}"
+        if name == "candidate":
+            tag += "-" + Path(args.candidate).stem
+        f = cache / f"{name}-{tag}.json"
         if f.exists():
             dets[name] = json.loads(f.read_text())
             print(f"{name}: cached ({f})")
             continue
-        dets[name] = run_detector(name, make_detector(name, champion, supported), frames, uris)
+        dets[name] = run_detector(name, make_detector(name, champion, supported, args.candidate), frames, uris)
         f.write_text(json.dumps(dets[name]))
 
     if "champion" in dets and "path_b" in dets:
@@ -218,9 +238,12 @@ async def main() -> int:
         for d in ("gdino", "owlv2"):
             if d in dets:
                 dets[f"champion+path_b+{d}"] = union(dets["champion+path_b (serving)"], dets[d])
+    if "candidate" in dets and "path_b" in dets:
+        dets["candidate+path_b"] = union(dets["candidate"], dets["path_b"])
 
     report = {"created": datetime.now(UTC).isoformat(timespec="seconds"), "frames": len(frames),
-              "champion": champion, "detectors": {}}
+              "champion": champion, "candidate": args.candidate, "test_split_only": args.test_split_only,
+              "detectors": {}}
     print(f"\n{'detector':<30} {'gold rec':>8} {'any':>6} {'small':>6} {'ruled cls':>9} {'missed':>7} {'junk':>6}")
     for name, d in dets.items():
         s = score(d, frames, gold, ruled, name_of)
@@ -232,7 +255,7 @@ async def main() -> int:
         print(f"{name:<30} {f(s['gold_recall_class']):>8} {f(s['gold_recall_any']):>6} {f(s['small_recall_class']):>6}"
               f" {f(s['ruled_class_correct']):>9} {f(s['ruled_missed']):>7} {f(s['junk_refire']):>6}")
 
-    out = cache / f"report-{args.max_frames}.json"
+    out = cache / f"report-{args.max_frames}{'-test' if args.test_split_only else ''}.json"
     out.write_text(json.dumps(report, indent=1))
     print(f"\nwrote {out}")
     if args.save:
