@@ -183,9 +183,9 @@ class OpenVocabSamPath:
     def _segment(self, image_bgr: np.ndarray, xyxy: np.ndarray, dev: str) -> np.ndarray | None:
         if len(xyxy) == 0:
             return None
-        from core.model_manager import manager
+        from core.model_manager import keep_gpu_visible, manager
 
-        with manager().infer_lock(self.sam_key):
+        with manager().infer_lock(self.sam_key), keep_gpu_visible():
             sres = self._sam.predict(source=image_bgr, bboxes=xyxy, device=dev, verbose=False)
         m = sres[0].masks
         if m is None or m.data is None:

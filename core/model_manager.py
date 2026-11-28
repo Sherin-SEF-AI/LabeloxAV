@@ -27,6 +27,7 @@ up behind them.
 from __future__ import annotations
 
 import contextlib
+import os
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -111,6 +112,32 @@ def vram_total_mb(device: str | int | None = None) -> float | None:
     except Exception:  # noqa: BLE001
         return None
     return float(total) / (1024 * 1024)
+
+
+@contextlib.contextmanager
+def keep_gpu_visible() -> Iterator[None]:
+    """Undo what an ultralytics predict does to the process environment.
+
+    Ultralytics' `select_device` writes CUDA_VISIBLE_DEVICES for the whole process on every predict: "-1"
+    for device="cpu", the index otherwise. The privacy plate detector runs on the CPU, so after the first
+    ingested frame, any process that had not yet touched CUDA could no longer see the GPU, and auto-label
+    in that process refused with "CUDA not available". Wrap every ultralytics predict that may run on the
+    CPU in this.
+
+    Restoring the variable afterwards is not enough on its own: the CUDA runtime reads it once, when the
+    process first touches CUDA, and torch caches the answer. If that first touch happens inside the CPU
+    predict, the GPU stays hidden for the life of the process. So CUDA is initialised before the predict.
+    """
+    before = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if before != "-1":
+        cuda_available()                         # first touch happens here, with the GPU still visible
+    try:
+        yield
+    finally:
+        if before is None:
+            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        else:
+            os.environ["CUDA_VISIBLE_DEVICES"] = before
 
 
 def empty_cuda_cache() -> None:

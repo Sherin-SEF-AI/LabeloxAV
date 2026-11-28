@@ -52,10 +52,10 @@ def segment(
         kwargs["points"] = points
         kwargs["labels"] = labels or [1] * len(points)
 
-    from core.model_manager import manager
+    from core.model_manager import keep_gpu_visible, manager
 
     # One prompt at a time on the shared instance: the predictor keeps the embedded image on itself.
-    with manager().infer_lock(_model_key()):
+    with manager().infer_lock(_model_key()), keep_gpu_visible():
         res = model.predict(source=image_bgr, **kwargs)
     masks = res[0].masks
     if masks is None or masks.data is None or len(masks.data) == 0:

@@ -113,7 +113,7 @@ def propose(image_bgr: np.ndarray, phrase: str, *, max_proposals: int = MAX_PROP
     world, sam = _models()
     dev = settings.gpu.device
 
-    from core.model_manager import manager
+    from core.model_manager import keep_gpu_visible, manager
 
     # set_classes and the predict that depends on it are one step: two annotators describing different
     # things at once would otherwise each be answered with the other's phrase.
@@ -131,7 +131,7 @@ def propose(image_bgr: np.ndarray, phrase: str, *, max_proposals: int = MAX_PROP
 
     masks = None
     try:
-        with manager().infer_lock(_sam_key()):
+        with manager().infer_lock(_sam_key()), keep_gpu_visible():
             sres = sam.predict(source=image_bgr, bboxes=xyxy, device=dev, verbose=False)
         m = sres[0].masks
         if m is not None and m.data is not None:

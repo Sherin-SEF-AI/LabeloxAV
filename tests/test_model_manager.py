@@ -257,3 +257,36 @@ def test_a_detector_that_returns_the_wrong_number_of_results_is_an_error_not_a_m
     path._model = type("Short", (), {"predict": lambda self, source, **kw: []})()
     with pytest.raises(RuntimeError, match="returned 0 results for 2 frames"):
         path.infer_batch([np.zeros((4, 4, 3), np.uint8)] * 2)
+
+
+@pytest.mark.parametrize("before", [None, "0"])
+def test_a_cpu_predict_does_not_hide_the_gpu_from_the_rest_of_the_process(monkeypatch, before):
+    # Ultralytics writes CUDA_VISIBLE_DEVICES="-1" on a CPU predict. The plate detector runs on the CPU, so
+    # an ingest followed by auto-label in one process refused with "CUDA not available".
+    from core.model_manager import keep_gpu_visible
+
+    if before is None:
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    else:
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", before)
+    import os
+
+    with pytest.raises(RuntimeError), keep_gpu_visible():
+        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+        raise RuntimeError("predict failed")
+    assert os.environ.get("CUDA_VISIBLE_DEVICES") == before
+
+
+def test_cuda_is_initialised_before_a_cpu_predict_can_hide_it(monkeypatch):
+    # The CUDA runtime reads CUDA_VISIBLE_DEVICES once, on first touch. A first touch inside the CPU predict
+    # hides the GPU for the life of the process, so the guard touches CUDA first, while it is still visible.
+    import os
+
+    import core.model_manager as mm
+
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    seen = []
+    monkeypatch.setattr(mm, "cuda_available", lambda: seen.append(os.environ.get("CUDA_VISIBLE_DEVICES")) or True)
+    with mm.keep_gpu_visible():
+        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+    assert seen == [None]

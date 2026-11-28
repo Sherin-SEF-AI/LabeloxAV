@@ -70,7 +70,10 @@ def _infer(model, images: list[np.ndarray], imgsz: int, conf_floor: float, devic
     reconstructed from what it does expose. Where it cannot be, `top_k` is empty rather than a fabricated
     one-hot: a distribution invented from the argmax would look like evidence and carry none.
     """
-    res = model.predict(images, imgsz=imgsz, conf=conf_floor, device=device, verbose=False)
+    from core.model_manager import keep_gpu_visible
+
+    with keep_gpu_visible():
+        res = model.predict(images, imgsz=imgsz, conf=conf_floor, device=device, verbose=False)
     out: list[list] = []
     for r in res:
         dets = []

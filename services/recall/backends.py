@@ -85,7 +85,10 @@ class RegionAdapter:
         h, w = image_bgr.shape[:2]
         frame_area = float(h * w)
         # WIRE: SAM everything mode (no prompt) proposes every region in the frame.
-        res = sam.predict(source=image_bgr, verbose=False, device=cfg.device)
+        from core.model_manager import keep_gpu_visible
+
+        with keep_gpu_visible():
+            res = sam.predict(source=image_bgr, verbose=False, device=cfg.device)
         masks = res[0].masks if res else None
         if masks is None or masks.data is None:
             return []

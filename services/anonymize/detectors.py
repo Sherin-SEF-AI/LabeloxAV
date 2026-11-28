@@ -100,8 +100,11 @@ class PlateDetector:
         # At the library default this ran on a 3x downsample and saw none of the small plates. The face
         # detector beside it has always used the frame's own size (`setInputSize`), which is why faces were
         # redacted and plates were not.
-        res = self._model.predict(image_bgr, conf=self.conf, device=self.device, verbose=False,
-                                  imgsz=_detect_size(h, w, self.imgsz_cap))
+        from core.model_manager import keep_gpu_visible
+
+        with keep_gpu_visible():                 # a CPU predict would hide the GPU from the whole process
+            res = self._model.predict(image_bgr, conf=self.conf, device=self.device, verbose=False,
+                                      imgsz=_detect_size(h, w, self.imgsz_cap))
         out: list[Region] = []
         for r in res:
             if r.boxes is None:
